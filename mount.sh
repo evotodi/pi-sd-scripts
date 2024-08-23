@@ -9,7 +9,9 @@ SQUASH=false
 SQUASH_FILE=""
 SQUASH_MOUNT=""
 SQUASH_MOUNT_CREATED=false
+GZIPPED=false
 LOOP=""
+RW=false
 
 # More safety, by turning some bugs into errors.
 set -o errexit -o pipefail -o noclobber -o nounset
@@ -23,18 +25,19 @@ fi
 
 usage() {
   echo "" 1>&2
-  echo "Usage: $0 [OPTIONS] IMAGE LOCATION PARTITION" 1>&2
+  echo "Usage: $0 [OPTIONS] IMAGE PARTITION" 1>&2
   echo "" 1>&2
   echo "Mount SD Card Image" 1>&2
   echo "" 1>&2
   echo "Arguments:" 1>&2
   echo "image                Image file to mount" 1>&2
-  echo "location             Where to mount the image" 1>&2
   echo "partition            Partition number to mount" 1>&2
   echo "" 1>&2
   echo "Options:" 1>&2
+  echo "-l|--location        Where to mount the image" 1>&2
   echo "-f|--squashfile      Name of image file inside squashfs file. Defaults to [output].img" 1>&2
   echo "-m|--squashmount     Where to mount the squash image" 1>&2
+  echo "-r|--rw              Mount read/write. Only works for non squashed" 1>&2
   echo "-s|--squash          Image is squashfs" 1>&2
   echo "-v|--verbose         Verbose" 1>&2
   echo "-h|--help            Show help" 1>&2
@@ -98,7 +101,7 @@ checkArguments() {
   fi
 
   if [ ! -d "$LOCATION" ]; then
-    printf "\nBase mount location is not a directory\n"
+    printf "\nBase mount location %s is not a directory\n" $LOCATION
     exit 3
   fi
 
@@ -160,20 +163,46 @@ doMountSquash() {
 }
 
 doMountImg() {
-  local loop
+  local loop cmd cmd_status
+  if file "$INPUT" | grep -q compressed; then
+    if ! ask "File is compressed. Uncompress?" N 10; then
+      exit 1
+    fi
+    echo ""
+    echo "Uncompromising $INPUT please wait..."
+    gzip -v -k -d $INPUT
+    INPUT="${INPUT%.*}"
+    GZIPPED=true
+  fi
+
   echo -e "\nMounting raw image"
   loop=$(losetup -vfP --show "$INPUT")
   echo -e "\nMake note of this loop device path for use when unmounting this image.\n$loop"
-  mount "$loop""p""$PARTITION" "$MOUNT"
+  cmd="mount"
+  if [[ "$RW" = true ]]; then
+    cmd="${cmd} -o rw,sync,user"
+  fi
+  cmd="${cmd} $loop""p$PARTITION $MOUNT"
+
+  cmd_status=$(eval "$cmd" || echo 99)
+
+  if [[ $cmd_status -ne 0 ]]; then
+      losetup -d "$loop"
+      echo "Mount failed. Removing loop device $loop"
+      exit 9
+  fi
+
   LOOP=$loop
+
+  chmod ugo+rw "$MOUNT"
 }
 
 # Check if no arguments or options
 [ $# -eq 0 ] && usage
 
 # option --output/-o requires 1 argument
-LONG_OPTS=squashfile:squashmount:squash,verbose,help
-OPTIONS=f:m:svh
+LONG_OPTS=location:squashfile:squashmount:squash,rw,verbose,help
+OPTIONS=l:f:m:srvh
 
 # -temporarily store output to be able to check for errors
 # -activate quoting/enhanced mode (e.g. by writing out “--options”)
@@ -185,6 +214,10 @@ eval set -- "$PARSED"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+  -l | --location)
+    LOCATION="$2"
+    shift 2
+    ;;
   -f | --squashfile)
     SQUASH_FILE="$2"
     shift 2
@@ -195,6 +228,10 @@ while [[ $# -gt 0 ]]; do
     ;;
   -s | --squash)
     SQUASH=true
+    shift
+    ;;
+  -r | --rw)
+    RW=true
     shift
     ;;
   -v | --verbose)
@@ -216,16 +253,20 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Check arguments
-if [[ $# -ne 3 ]]; then
-  if [ "$INPUT" = "" ] && [ "$LOCATION" = "" ]; then
-    printf "Arguments image and location are required.\nExecute '%s -h' for help\n" "$0"
+if [[ $# -ne 2 ]]; then
+  if [ "$INPUT" = "" ]; then
+    printf "Argument image is required.\nExecute '%s -h' for help\n" "$0"
     exit 4
   fi
 fi
 
+if [ "$LOCATION" = "" ]; then
+  LOCATION=$(mktemp -d)
+  chmod ugo+rw "$LOCATION"
+fi
+
 INPUT="$1"
-LOCATION="$2"
-PARTITION="$3"
+PARTITION="$2"
 
 checkRoot
 checkArguments
@@ -257,8 +298,8 @@ echo -e "\nSD Card image mounted to $MOUNT"
 # Write out mount file
 HASH=$(echo -n "$INPUT" | shasum | cut -d ' ' -f 1)
 rm -f /tmp/"$HASH".mount 2> /dev/null
-echo "input,mount,squash,squash_mount,squash_mount_created,loop" > /tmp/"$HASH".mount
-echo "$INPUT,$MOUNT,$SQUASH,$SQUASH_MOUNT,$SQUASH_MOUNT_CREATED,$LOOP" >> /tmp/"$HASH".mount
+echo "input,mount,squash,squash_mount,squash_mount_created,loop,gzipped" > /tmp/"$HASH".mount
+echo "$INPUT,$MOUNT,$SQUASH,$SQUASH_MOUNT,$SQUASH_MOUNT_CREATED,$LOOP,$GZIPPED" >> /tmp/"$HASH".mount
 
 if [[ "$VERBOSE" = true ]]; then
   echo -e "\nCreated mount file /tmp/$HASH.mount"

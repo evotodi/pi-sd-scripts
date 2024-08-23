@@ -9,6 +9,7 @@ SQUASH=false
 SQUASH_MOUNT=""
 SQUASH_MOUNT_CREATED=false
 LOOP=""
+GZIPPED=false
 
 # More safety, by turning some bugs into errors.
 set -o errexit -o pipefail -o noclobber -o nounset
@@ -93,13 +94,13 @@ checkArguments() {
 }
 
 readMountFile() {
-  local csv_input csv_mount csv_squash csv_squash_mount csv_squash_mount_created csv_loop
+  local csv_input csv_mount csv_squash csv_squash_mount csv_squash_mount_created csv_loop csv_gzipped
   if [[ ! -f /tmp/"$HASH".mount ]]; then
     echo -e "\nNo mount file found for this image\nYou will need to manually unmount /dev/loopX and the folder(s)"
     exit 3
   fi
 
-  while IFS="," read -r csv_input csv_mount csv_squash csv_squash_mount csv_squash_mount_created csv_loop; do
+  while IFS="," read -r csv_input csv_mount csv_squash csv_squash_mount csv_squash_mount_created csv_loop csv_gzipped; do
 #    if [[ "$VERBOSE" = true ]]; then
 #      echo "INPUT = $csv_input"
 #      echo "MOUNT = $csv_mount"
@@ -107,6 +108,7 @@ readMountFile() {
 #      echo "SQUASH_MOUNT = $csv_squash_mount"
 #      echo "SQUASH_MOUNT_CREATED = $csv_squash_mount_created"
 #      echo "LOOP = $csv_loop"
+#      echo "GZIPPED = $csv_gzipped"
 #    fi
     INPUT_MNT=$csv_input
     MOUNT=$csv_mount
@@ -114,6 +116,7 @@ readMountFile() {
     SQUASH_MOUNT=$csv_squash_mount
     SQUASH_MOUNT_CREATED=$csv_squash_mount_created
     LOOP=$csv_loop
+    GZIPPED=$csv_gzipped
   done < <(tail -n +2 /tmp/"$HASH".mount)
 }
 
@@ -128,6 +131,20 @@ unmountImg() {
   losetup -vd "$LOOP"
 }
 
+rmGzipped() {
+  if [[ "$GZIPPED" = true ]]; then
+    if ! ask "Remove uncompressed image $INPUT?" N 10; then
+      return 1
+    fi
+
+    rm $INPUT
+
+    return 0
+  fi
+
+  return 0
+}
+
 cleanUp() {
   if [[ "$VERBOSE" = true ]]; then
     echo -e "\nCleaning up"
@@ -137,6 +154,8 @@ cleanUp() {
   fi
 
   rm -rf "$MOUNT"
+
+  rmGzipped
 
   rm -f /tmp/"$HASH".mount
 }
@@ -207,6 +226,7 @@ if [[ "$VERBOSE" = true ]]; then
     echo "SQUASH MOUNT CREATED= $SQUASH_MOUNT_CREATED"
   fi
   echo "LOOP = $LOOP"
+  echo "GZIPPED = $GZIPPED"
   echo ""
 fi
 
