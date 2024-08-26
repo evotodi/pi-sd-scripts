@@ -287,11 +287,13 @@ doBackup() {
   fi
 
   if [[ "$VERBOSE" = true ]]; then
-    echo "$CMD"
+    echo "Backup Command: $CMD"
   fi
 
   if [[ "$DRY_RUN" = false ]]; then
     eval "$CMD"
+  else
+    echo "Dry Run Command: $CMD"
   fi
 
   if [[ "$SQUASH" = true ]]; then
