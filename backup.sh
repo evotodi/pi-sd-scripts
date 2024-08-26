@@ -11,6 +11,7 @@ DDCMD="dd"
 USE_DCFLDD=true
 SQUASHFILE=""
 BS="1M"
+BS_COUNT="FULL"
 TMPLOC=$(mktemp -d)
 DRY_RUN=false
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
@@ -37,6 +38,7 @@ usage() {
   echo "$0 -s -f MyImage.img /dev/sdd ./MyImage.sqfs" 1>&2
   echo "$0 -g /dev/sdd ./MyImage.img.gz" 1>&2
   echo "$0 -n /dev/sdd ./MyImage.img" 1>&2
+  echo "$0 -n -c 4000 /dev/sdd ./MyImage.img" 1>&2
   echo "" 1>&2
   echo "Arguments:" 1>&2
   echo "device               SD Card Device (/dev/sdX)" 1>&2
@@ -45,6 +47,7 @@ usage() {
   echo "Options:" 1>&2
   echo "-f|--squashfile      Name of image file inside squashfs file. Defaults to [output].img" 1>&2
   echo "-b|--bs              Set dd/dcfldd bs argument. Defaults to $BS" 1>&2
+  echo "-c|--count           Set dd/dcfldd count argument. Defaults to full disk" 1>&2
   echo "-t|--temploc         Set the temp folder location when squashing. Defaults to $TMPLOC" 1>&2
   echo "-n|--nocompress      Do not compress the image" 1>&2
   echo "-g|--gz              (default) Compress image with gzip" 1>&2
@@ -199,7 +202,7 @@ checkWgetExists() {
 }
 
 checkPiShrinkExists() {
-  if [ ! -f pishrink.sh ]; then
+  if [ ! -f "$SCRIPT_DIR/pishrink.sh" ]; then
       echo -e "\nPiShrink not installed"
 
       if checkWgetExists; then
@@ -245,10 +248,16 @@ doBackup() {
   local CMD_SHRINK=" "
 
   if [[ "$DDCMD" = "dcfldd" ]]; then
-    CMD_DD_TEMP="$DDCMD bs=$BS status=on if=$DEVICE"
+    CMD_DD_TEMP="$DDCMD bs=$BS status=on"
   else
-    CMD_DD_TEMP="$DDCMD bs=$BS status=progress if=$DEVICE"
+    CMD_DD_TEMP="$DDCMD bs=$BS status=progress"
   fi
+
+  if [[ "$BS_COUNT" != "FULL" ]]; then
+    CMD_DD_TEMP="$CMD_DD_TEMP count=$BS_COUNT"
+  fi
+
+  CMD_DD_TEMP="$CMD_DD_TEMP if=$DEVICE"
 
   if [[ "$SHRINK" = true ]]; then
     CMD_SHRINK="$SCRIPT_DIR/pishrink.sh "
@@ -301,8 +310,8 @@ doBackup() {
 [ $# -eq 0 ] && usage
 
 # option --output/-o requires 1 argument
-LONG_OPTS=squashfile:bs:temploc:nocompress,gzip,squash,shrink,nodcfldd,dryrun,verbose,help
-OPTIONS=f:b:t:ngspdvh
+LONG_OPTS=squashfile:bs:count:temploc:nocompress,gzip,squash,shrink,nodcfldd,dryrun,verbose,help
+OPTIONS=f:b:c:t:ngspdvh
 
 # -temporarily store output to be able to check for errors
 # -activate quoting/enhanced mode (e.g. by writing out “--options”)
@@ -320,6 +329,10 @@ while [[ $# -gt 0 ]]; do
     ;;
   -b | --bs)
     BS="$2"
+    shift 2
+    ;;
+  -c | --count)
+    BS_COUNT="$2"
     shift 2
     ;;
   -t | --temploc)
@@ -401,6 +414,8 @@ if [[ "$VERBOSE" = true ]]; then
   echo "SQUASH = $SQUASH"
   echo "SHRINK = $SHRINK"
   echo "USE DCFLDD = $USE_DCFLDD"
+  echo "BS = $BS"
+  echo "COUNT = $BS_COUNT"
   if [[ "$SQUASH" = true ]]; then
     echo "SQUASH FILE = $SQUASHFILE"
   fi
